@@ -1,0 +1,14 @@
+*#
+*.iml
+*.ipr
+*.iws
+*.jar
+*.sw?
+*~
+.#*
+.DS_Store
+.classpath
+.factorypath
+.idea
+.metadata
+target
