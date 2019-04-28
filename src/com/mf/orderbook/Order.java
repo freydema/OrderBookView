@@ -43,10 +43,6 @@ public class Order {
         return quantity;
     }
 
-    public void setQuantity(long quantity) {
-        this.quantity = Math.max(0, quantity);
-    }
-
     void updateQuantity(long delta) {
         this.quantity = quantity + delta;
         if(quantity <= 0) quantity = 0;
