@@ -272,6 +272,7 @@ public class OrderBookTest {
         } catch (InterruptedException ex) {
             ex.printStackTrace();
         }
+        executor.shutdown();
     }
 
     private void checkBookDepth(Level2View orderBook, long expectedBidDepth, long expectedAskDepth) {
