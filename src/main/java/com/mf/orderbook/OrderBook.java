@@ -12,7 +12,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 
-public class OrderBook3 implements Level2View {
+public class OrderBook implements Level2View {
 
     private static final int DEFAULT_PRICE_SCALE = 4;
     private static Comparator<PriceLevel> PRICE_LEVEL_ASCENDING = (p1, p2) -> p1.getPrice().compareTo(p2.getPrice());
@@ -32,12 +32,12 @@ public class OrderBook3 implements Level2View {
     private final Map<BigDecimal, PriceLevel> askPriceLevelMap;
 
 
-    public OrderBook3() {
+    public OrderBook() {
         this(DEFAULT_PRICE_SCALE);
     }
 
 
-    public OrderBook3(int priceScale) {
+    public OrderBook(int priceScale) {
         this.priceScale = priceScale;
         priceLevelLocks = new ConcurrentHashMap<>();
         orderMap = new ConcurrentHashMap<>();
@@ -50,14 +50,16 @@ public class OrderBook3 implements Level2View {
     }
 
 
-    /*
-   Place a new order in:
+    /* Place a new order in:
       - o(log N) if size of that price level is 0  on the given side of the book.
        N being the depth of the book for that side. This is due to the add operation on the sorted set
       - o(1) otherwise
    */
     @Override
     public void onNewOrder(Side side, BigDecimal price, long quantity, long orderId) {
+        // This is an arbitrary decision to ignore the order when the validation fails.
+        // We could also throw a Runtime exception...
+        if(side == null || price == null || price.signum() <=0 || quantity <= 0) return;
         price = normalizePrice(price);
         Map<BigDecimal, PriceLevel> priceLevelMap = side == Side.BID ? bidPriceLevelMap : askPriceLevelMap;
         Lock priceLevelLock = getPriceLevelLock(price);
@@ -81,15 +83,13 @@ public class OrderBook3 implements Level2View {
             } else {
                 order.setPriceLevel(priceLevel);
                 priceLevel.getTotalOrderQuantity().getAndAdd(quantity);
-                priceLevel.getTotalOrderQuantity();
             }
         } finally {
             priceLevelLock.unlock();
         }
     }
 
-    /*
-    Cancel an order in:
+    /* Cancel an order in:
        - o(log N) if the total quantity for the price level and side is 0 after that cancel.
         N being the depth of the book for that side. This is due to the remove operation on the sorted set
        - o(1) otherwise
@@ -119,28 +119,29 @@ public class OrderBook3 implements Level2View {
         }
     }
 
-    /*
-    Replace an order in:
+    /* Replace an order in:
         - o(1) best case
         - o(2 * log N) = o(log N) worst case
        See details on the called method comments
     */
     @Override
     public void onReplaceOrder(BigDecimal price, long quantity, long orderId) {
+        if(price == null || price.signum() <=0 || quantity <= 0) return;
         price = normalizePrice(price);
         Order order = orderMap.get(orderId);
+        if(order == null) return;
         onCancelOrder(orderId);
         onNewOrder(order.getSide(), price, quantity, orderId);
     }
 
-    /*
-    Fill an order in:
+    /* Fill an order in:
         - o(log N) if the total quantity for the price level and side is 0 after that trade.
          N being the depth of the book for that side. This is due to the remove operation on the sorted set
         - o(1) otherwise
     */
     @Override
     public void onTrade(long quantity, long restingOrderId) {
+        if(quantity <= 0) return;
         Order order = orderMap.get(restingOrderId);
         if (order == null) return;
         Lock priceLevelLock = getPriceLevelLock(order.getPrice());

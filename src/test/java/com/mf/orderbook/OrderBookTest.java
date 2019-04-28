@@ -26,6 +26,12 @@ public class OrderBookTest {
     private static final BigDecimal P22 = BigDecimal.valueOf(22);
     private static final BigDecimal P23 = BigDecimal.valueOf(23);
     private static final BigDecimal P24 = BigDecimal.valueOf(24);
+    private static final BigDecimal PNEGATIVE = BigDecimal.valueOf(-10);
+
+
+    private Level2View createOrderBook() {
+        return new OrderBook();
+    }
 
 
     @Test
@@ -116,35 +122,75 @@ public class OrderBookTest {
         checkSizeForPriceLevel(book, P23, 0, 0);
     }
 
+
     @Test
-    public void anotherTest() {
+    public void validationTest(){
         Level2View book = createOrderBook();
-        book.onNewOrder(BID, BigDecimal.valueOf(21.0), 100, ORDER_1);
-        checkTopOfBook(book, P21, P0);
+        checkSizeForPriceLevel(book, P0, 0, 0);
+        checkTopOfBook(book, P0, P0);
+        checkBookDepth(book, 0, 0);
+        // Cancel an order that does not exist -> no change
+        book.onCancelOrder(ORDER_1);
+        checkSizeForPriceLevel(book, P0, 0, 0);
+        checkTopOfBook(book, P0, P0);
+        checkBookDepth(book, 0, 0);
+        // Replace an order that does not exist -> no change
+        book.onReplaceOrder(P21, 100, ORDER_1);
+
+        checkSizeForPriceLevel(book, P0, 0, 0);
+        checkTopOfBook(book, P0, P0);
+        checkBookDepth(book, 0, 0);
+        // Fill an order that does not exist -> no change
+        book.onTrade(100, ORDER_1);
+        checkSizeForPriceLevel(book, P0, 0, 0);
+        checkTopOfBook(book, P0, P0);
+        checkBookDepth(book, 0, 0);
+        // New order with negative price -> ignored
+        book.onNewOrder(BID, PNEGATIVE, 100, ORDER_1);
+        // New order with negative or zero quantity -> ignored
+        book.onNewOrder(BID, P21, -100, ORDER_1);
+        book.onNewOrder(BID, P21, 0, ORDER_1);
+        // New order with null side -> ignored
+        book.onNewOrder(null, P21, -100, ORDER_1);
+        // New order with null price -> ignored
+        book.onNewOrder(BID, null, 100, ORDER_1);
+        // New order with invalid order id -> ignored
+        book.onNewOrder(BID, null, 100, -ORDER_1);
+        checkSizeForPriceLevel(book, P0, 0, 0);
+        checkTopOfBook(book, P0, P0);
+        checkBookDepth(book, 0, 0);
+        // Add valid order
+        book.onNewOrder(BID, P21, 100, ORDER_2);
         checkSizeForPriceLevel(book, P21, 100, 0);
-        checkBookDepth(book, 1, 0);
-        book.onNewOrder(BID, P21, 300, ORDER_2);
         checkTopOfBook(book, P21, P0);
-        checkSizeForPriceLevel(book, P21, 400, 0);
         checkBookDepth(book, 1, 0);
-        book.onNewOrder(ASK, P22, 700, ORDER_3);
-        checkTopOfBook(book, P21, P22);
-        checkSizeForPriceLevel(book, P21, 400, 0);
-        checkSizeForPriceLevel(book, P22, 0, 700);
-        checkBookDepth(book, 1, 1);
-        book.onReplaceOrder(P22, 150, ORDER_1);
-        checkTopOfBook(book, P22, P22);
-        checkSizeForPriceLevel(book, P21, 300, 0);
-        checkSizeForPriceLevel(book, P22, 150, 700);
+        // Replace an order with null/negative price or quantity -> no change
+        book.onReplaceOrder(P21, -100, ORDER_2);
+        book.onReplaceOrder(null, 100, ORDER_2);
+        book.onReplaceOrder(PNEGATIVE, 100, ORDER_2);
+        checkSizeForPriceLevel(book, P21, 100, 0);
+        checkTopOfBook(book, P21, P0);
+        checkBookDepth(book, 1, 0);
+        // Fill an order with negative quantity -> no change
+        book.onTrade(-100, ORDER_2);
+        checkSizeForPriceLevel(book, P21, 100, 0);
+        checkTopOfBook(book, P21, P0);
+        checkBookDepth(book, 1, 0);
     }
+
 
     @Test
     public void loadTest() {
         int nbOrders = 500000;
+        // Test the impact of the price range
         newOrderloadTest(nbOrders, 1, 10, 11);
-        newOrderloadTest(nbOrders, 1, 10, 12);
         newOrderloadTest(nbOrders, 1, 10, 14);
         newOrderloadTest(nbOrders, 1, 10, 30);
+        // Test the impact of the number of threads adding orders for a small price range
+        newOrderloadTest(nbOrders, 1, 10, 12);
+        newOrderloadTest(nbOrders, 4, 10, 12);
+        newOrderloadTest(nbOrders, 8, 10, 12);
+        // Test the impact of the number of threads adding orders for large price range
         newOrderloadTest(nbOrders, 1, 10, 60);
         newOrderloadTest(nbOrders, 4, 10, 60);
         newOrderloadTest(nbOrders, 8, 10, 60);
@@ -226,14 +272,9 @@ public class OrderBookTest {
         } catch (InterruptedException ex) {
             ex.printStackTrace();
         }
-
-
     }
 
 
-    private Level2View createOrderBook() {
-        return new OrderBook3();
-    }
 
     private void checkBookDepth(Level2View orderBook, long expectedBidDepth, long expectedAskDepth) {
         Assert.assertEquals(expectedBidDepth, orderBook.getBookDepth(BID));
@@ -250,6 +291,11 @@ public class OrderBookTest {
         Assert.assertEquals(expectedBidSize, orderBook.getSizeForPriceLevel(BID, priceLevel));
         Assert.assertEquals(expectedAskSize, orderBook.getSizeForPriceLevel(ASK, priceLevel));
     }
+
+
+    //
+    // NewOrderAction class
+    //
 
     private class NewOrderAction implements Runnable {
 
