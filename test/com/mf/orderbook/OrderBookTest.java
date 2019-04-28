@@ -1,6 +1,11 @@
 package com.mf.orderbook;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -9,6 +14,7 @@ import static com.mf.orderbook.Level2View.Side.*;
 
 public class OrderBookTest {
 
+    private static final long SEED = 1;
     private static final long ORDER_1 = 1;
     private static final long ORDER_2 = 2;
     private static final long ORDER_3 = 3;
@@ -83,7 +89,7 @@ public class OrderBookTest {
     }
 
     @Test
-    public void getSizeForPriceLevelTest(){
+    public void getSizeForPriceLevelTest() {
         Level2View book = createOrderBook();
         //BigDecimal P21 = Level2ViewTest.P21;
         // No order for price level: BID and ASK sizes are zero on price level 1
@@ -111,7 +117,7 @@ public class OrderBookTest {
     }
 
     @Test
-    public void anotherTest(){
+    public void anotherTest() {
         Level2View book = createOrderBook();
         book.onNewOrder(BID, BigDecimal.valueOf(21.0), 100, ORDER_1);
         checkTopOfBook(book, P21, P0);
@@ -133,20 +139,99 @@ public class OrderBookTest {
     }
 
     @Test
-    public void onCancelOrderTest(){
+    public void loadTest() {
+        int nbOrders = 500000;
+        newOrderloadTest(nbOrders, 1, 10, 11);
+        newOrderloadTest(nbOrders, 1, 10, 12);
+        newOrderloadTest(nbOrders, 1, 10, 14);
+        newOrderloadTest(nbOrders, 1, 10, 30);
+        newOrderloadTest(nbOrders, 1, 10, 60);
+        newOrderloadTest(nbOrders, 4, 10, 60);
+        newOrderloadTest(nbOrders, 8, 10, 60);
+    }
+
+
+    private void newOrderloadTest(int nbOrders, int nbThreads, double minPrice, double maxPrice) {
+        System.out.println("------------------------------------------------------------------------");
+        System.out.println("NewOrderLoadTest: nbOrders = " + nbOrders + " nbThreads = " + nbThreads);
+        System.out.println("minPrice = " + minPrice + " maxPrice = " + maxPrice);
+        System.out.println("------------------------------------------------------------------------");
+        Level2View book = createOrderBook();
+        int priceScale = 4;
+        int minQty = 100;
+        int maxQty = 200;
+
+        BigDecimal bestBid = null;
+        BigDecimal bestAsk = null;
+
+        Map<BigDecimal, Long> bids = new HashMap<>();
+        Map<BigDecimal, Long> asks = new HashMap<>();
+
+        Random r = new Random(SEED);
+        long orderId = 0;
+
+        List<Runnable> actionQueue = new ArrayList<>();
+        CountDownLatch countDownLatch = new CountDownLatch(nbOrders);
+        for (int i = 1; i <= nbOrders; i++) {
+            BigDecimal price = BigDecimal.valueOf(r.nextDouble() * (maxPrice - minPrice) + minPrice).setScale(priceScale, RoundingMode.UP);
+            long quantity = r.nextInt(maxQty) + minQty;
+            Level2View.Side side = r.nextBoolean() ? BID : ASK;
+            if (side == BID) {
+                Long currentQuantity = bids.get(price);
+                if (currentQuantity == null) currentQuantity = 0L;
+                bids.put(price, currentQuantity + quantity);
+                if (bestBid == null || price.compareTo(bestBid) > 0) { // Mind the comparison sign!
+                    bestBid = price;
+                }
+            } else {
+                Long currentQuantity = asks.get(price);
+                if (currentQuantity == null) currentQuantity = 0L;
+                asks.put(price, currentQuantity + quantity);
+                if (bestAsk == null || price.compareTo(bestAsk) < 0) { // Mind the comparison sign!
+                    bestAsk = price;
+                }
+            }
+            actionQueue.add(new NewOrderAction(book, side, price, quantity, orderId++, countDownLatch));
+        }
+
+        System.out.println("Action queue created: " + actionQueue.size() + " actions");
+        System.out.println("bids depth: " + bids.size() + ", best bid = " + bestBid);
+        System.out.println("asks depth: " + asks.size() + ", best ask = " + bestAsk);
+
+        System.out.println("Submitting actions...");
+        ExecutorService executor = Executors.newFixedThreadPool(nbThreads);
+        for (Runnable action : actionQueue) {
+            executor.submit(action);
+        }
+        System.out.println("All actions submitted");
+        try {
+            long start = System.currentTimeMillis();
+            countDownLatch.await();
+            long end = System.currentTimeMillis();
+            System.out.println("All actions completed in " + (end - start) + " ms");
+
+            System.out.println("Checking book state: depth, top of book, size for each price level...");
+            start = System.currentTimeMillis();
+            checkBookDepth(book, bids.size(), asks.size());
+            checkTopOfBook(book, bestBid, bestAsk);
+            for (BigDecimal price : bids.keySet()) {
+                Assert.assertEquals(bids.get(price), Long.valueOf(book.getSizeForPriceLevel(BID, price)));
+            }
+            for (BigDecimal price : asks.keySet()) {
+                Assert.assertEquals(asks.get(price), Long.valueOf(book.getSizeForPriceLevel(ASK, price)));
+            }
+            end = System.currentTimeMillis();
+            System.out.println("Book state checks completed in " + (end - start) + " ms");
+
+        } catch (InterruptedException ex) {
+            ex.printStackTrace();
+        }
+
 
     }
 
 
-
-    @Test
-    public void onTradeTest(){
-
-
-    }
-
-
-    private Level2View createOrderBook(){
+    private Level2View createOrderBook() {
         return new OrderBook3();
     }
 
@@ -166,4 +251,33 @@ public class OrderBookTest {
         Assert.assertEquals(expectedAskSize, orderBook.getSizeForPriceLevel(ASK, priceLevel));
     }
 
+    private class NewOrderAction implements Runnable {
+
+        private final Level2View book;
+        private final Level2View.Side side;
+        private final BigDecimal price;
+        private final long quantity;
+        private final long orderId;
+        private final CountDownLatch countDownLatch;
+
+        public NewOrderAction(Level2View book,
+                              Level2View.Side side,
+                              BigDecimal price,
+                              long quantity,
+                              long orderId,
+                              CountDownLatch countDownLatch) {
+            this.book = book;
+            this.side = side;
+            this.price = price;
+            this.quantity = quantity;
+            this.orderId = orderId;
+            this.countDownLatch = countDownLatch;
+        }
+
+        @Override
+        public void run() {
+            book.onNewOrder(side, price, quantity, orderId);
+            if (countDownLatch != null) countDownLatch.countDown();
+        }
+    }
 }

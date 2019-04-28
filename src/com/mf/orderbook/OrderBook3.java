@@ -60,8 +60,8 @@ public class OrderBook3 implements Level2View {
     public void onNewOrder(Side side, BigDecimal price, long quantity, long orderId) {
         price = normalizePrice(price);
         Map<BigDecimal, PriceLevel> priceLevelMap = side == Side.BID ? bidPriceLevelMap : askPriceLevelMap;
-        Lock lock = getPriceLevelLock(price);
-        lock.lock();
+        Lock priceLevelLock = getPriceLevelLock(price);
+        priceLevelLock.lock();
         try {
             Order order = new Order(side, price, quantity, orderId);
             PriceLevel priceLevel = priceLevelMap.get(price);
@@ -81,9 +81,10 @@ public class OrderBook3 implements Level2View {
             } else {
                 order.setPriceLevel(priceLevel);
                 priceLevel.getTotalOrderQuantity().getAndAdd(quantity);
+                priceLevel.getTotalOrderQuantity();
             }
         } finally {
-            lock.lock();
+            priceLevelLock.unlock();
         }
     }
 
@@ -114,7 +115,7 @@ public class OrderBook3 implements Level2View {
                 }
             }
         } finally {
-            priceLevelLock.lock();
+            priceLevelLock.unlock();
         }
     }
 
