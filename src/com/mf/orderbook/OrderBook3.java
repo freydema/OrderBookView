@@ -8,8 +8,8 @@ import java.util.SortedSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 public class OrderBook3 implements Level2View {
@@ -19,7 +19,9 @@ public class OrderBook3 implements Level2View {
     private static Comparator<PriceLevel> PRICE_LEVEL_DESCENDING = (p1, p2) -> -p1.getPrice().compareTo(p2.getPrice());
 
 
-    private final Map<BigDecimal, ReadWriteLock> priceLevelLocks;
+    // Contain RW locks
+    private final Map<BigDecimal, Lock> priceLevelLocks;
+
     private final int priceScale;
     private final Map<Long, Order> orderMap;
     private final AtomicLong bidPriceLevelsDepth;
@@ -48,12 +50,18 @@ public class OrderBook3 implements Level2View {
     }
 
 
+    /*
+   Place a new order in:
+      - o(log N) if size of that price level is 0  on the given side of the book.
+       N being the depth of the book for that side. This is due to the add operation on the sorted set
+      - o(1) otherwise
+   */
     @Override
     public void onNewOrder(Side side, BigDecimal price, long quantity, long orderId) {
         price = normalizePrice(price);
         Map<BigDecimal, PriceLevel> priceLevelMap = side == Side.BID ? bidPriceLevelMap : askPriceLevelMap;
-        ReadWriteLock lock = getPriceLevelLock(price);
-        lock.writeLock().lock();
+        Lock lock = getPriceLevelLock(price);
+        lock.lock();
         try {
             Order order = new Order(side, price, quantity, orderId);
             PriceLevel priceLevel = priceLevelMap.get(price);
@@ -61,59 +69,105 @@ public class OrderBook3 implements Level2View {
             if (priceLevel == null) {
                 priceLevel = new PriceLevel(price, quantity);
                 order.setPriceLevel(priceLevel);
-                addPriceLevel(priceLevel, side);
+                if (order.getSide() == Side.BID) {
+                    bidPriceLevelMap.put(priceLevel.getPrice(), priceLevel);
+                    bidPriceLevels.add(priceLevel);
+                    bidPriceLevelsDepth.getAndIncrement();
+                } else {
+                    askPriceLevelMap.put(priceLevel.getPrice(), priceLevel);
+                    askPriceLevels.add(priceLevel);
+                    askPriceLevelsDepth.getAndIncrement();
+                }
             } else {
                 order.setPriceLevel(priceLevel);
                 priceLevel.getTotalOrderQuantity().getAndAdd(quantity);
             }
         } finally {
-            lock.writeLock().unlock();
+            lock.lock();
         }
     }
 
+    /*
+    Cancel an order in:
+       - o(log N) if the total quantity for the price level and side is 0 after that cancel.
+        N being the depth of the book for that side. This is due to the remove operation on the sorted set
+       - o(1) otherwise
+    */
     @Override
     public void onCancelOrder(long orderId) {
         Order order = orderMap.remove(orderId);
         if (order == null) return;
-        ReadWriteLock priceLevelLock = getPriceLevelLock(order.getPrice());
-        priceLevelLock.writeLock().lock();
+        Lock priceLevelLock = getPriceLevelLock(order.getPrice());
+        priceLevelLock.lock();
         try {
-            order.getPriceLevel().updateTotalOrderQuantity(-order.getQuantity());
+            PriceLevel priceLevel = order.getPriceLevel();
+            priceLevel.updateTotalOrderQuantity(-order.getQuantity());
             if (order.getPriceLevel().getTotalOrderQuantity().get() == 0) {
-                removePriceLevel(order.getPriceLevel(), order.getSide());
+                if (order.getSide() == Side.BID) {
+                    bidPriceLevelMap.remove(priceLevel.getPrice());
+                    bidPriceLevels.remove(priceLevel); // o(log N) operation
+                    bidPriceLevelsDepth.getAndDecrement();
+                } else {
+                    askPriceLevelMap.remove(priceLevel.getPrice());
+                    askPriceLevels.remove(priceLevel);
+                    askPriceLevelsDepth.getAndDecrement();
+                }
             }
         } finally {
-            priceLevelLock.writeLock().unlock();
+            priceLevelLock.lock();
         }
     }
 
+    /*
+    Replace an order in:
+        - o(1) best case
+        - o(2 * log N) = o(log N) worst case
+       See details on the called method comments
+    */
     @Override
     public void onReplaceOrder(BigDecimal price, long quantity, long orderId) {
+        price = normalizePrice(price);
         Order order = orderMap.get(orderId);
         onCancelOrder(orderId);
         onNewOrder(order.getSide(), price, quantity, orderId);
     }
 
+    /*
+    Fill an order in:
+        - o(log N) if the total quantity for the price level and side is 0 after that trade.
+         N being the depth of the book for that side. This is due to the remove operation on the sorted set
+        - o(1) otherwise
+    */
     @Override
     public void onTrade(long quantity, long restingOrderId) {
         Order order = orderMap.get(restingOrderId);
         if (order == null) return;
-        ReadWriteLock priceLevelLock = getPriceLevelLock(order.getPrice());
-        priceLevelLock.writeLock().lock();
+        Lock priceLevelLock = getPriceLevelLock(order.getPrice());
+        priceLevelLock.lock();
         try {
-            order.getPriceLevel().updateTotalOrderQuantity(-quantity);
+            PriceLevel priceLevel = order.getPriceLevel();
+            priceLevel.updateTotalOrderQuantity(-quantity);
             order.updateQuantity(-quantity);
             if(order.getQuantity() == 0){
                 orderMap.remove(restingOrderId);
             }
-            if (order.getPriceLevel().getTotalOrderQuantity().get() == 0) {
-                removePriceLevel(order.getPriceLevel(), order.getSide());
+            if (priceLevel.getTotalOrderQuantity().get() == 0) {
+                if (order.getSide() == Side.BID) {
+                    bidPriceLevelMap.remove(priceLevel.getPrice());
+                    bidPriceLevels.remove(priceLevel);
+                    bidPriceLevelsDepth.getAndDecrement();
+                } else {
+                    askPriceLevelMap.remove(priceLevel.getPrice());
+                    askPriceLevels.remove(priceLevel);
+                    askPriceLevelsDepth.getAndDecrement();
+                }
             }
         } finally {
-            priceLevelLock.writeLock().unlock();
+            priceLevelLock.unlock();
         }
     }
 
+    // Returns the total volume on the given side and price of the book in o(1) time
     @Override
     public long getSizeForPriceLevel(Side side, BigDecimal price) {
         price = normalizePrice(price);
@@ -122,11 +176,13 @@ public class OrderBook3 implements Level2View {
         return priceLevel == null ? 0 : priceLevel.getTotalOrderQuantity().get();
     }
 
+    // Returns the book depth on the given side of the book in o(1) time
     @Override
     public long getBookDepth(Side side) {
         return side == Side.BID ? bidPriceLevelsDepth.get() : askPriceLevelsDepth.get();
     }
 
+    // Returns the best price on the given side of the book in o(1) time
     @Override
     public BigDecimal getTopOfBook(Side side) {
         SortedSet<PriceLevel> priceLevels = side == Side.BID ? bidPriceLevels : askPriceLevels;
@@ -134,57 +190,25 @@ public class OrderBook3 implements Level2View {
         return priceLevels.first().getPrice();
     }
 
+    // Set the scale of given price to the one used by the order book. This method should be called on every public method
+    // of the book that uses a price. This is to be able to use BigDecimal as a key for the different internal maps
     private BigDecimal normalizePrice(BigDecimal price) {
         return price.setScale(priceScale, RoundingMode.UNNECESSARY);
     }
 
-    private ReadWriteLock getPriceLevelLock(BigDecimal price){
-        ReadWriteLock lock = priceLevelLocks.get(price);
+    private Lock getPriceLevelLock(BigDecimal price){
+        Lock lock = priceLevelLocks.get(price);
         if(lock != null) return lock;
-        // If no lock was ever created, create one.
+        // If no lock was ever created, create one. Thread contention on that synchronized block should happen only the
+        // rare case when two orders are created at the same time, for the same price level, for which no lock has been created yet
         synchronized (this) {
             // check again that the lock was not created by another thread that was in this synchronized block before
             lock = priceLevelLocks.get(price);
             if(lock != null) return lock;
-            lock = new ReentrantReadWriteLock();
+            lock = new ReentrantLock();
             priceLevelLocks.put(price, lock);
             return lock;
         }
-    }
-
-
-    private void addPriceLevel(PriceLevel priceLevel, Side side) {
-        if (side == Side.BID) {
-            addPriceLevel(bidPriceLevels, bidPriceLevelMap, bidPriceLevelsDepth, priceLevel);
-        } else {
-            addPriceLevel(askPriceLevels, askPriceLevelMap, askPriceLevelsDepth, priceLevel);
-        }
-    }
-
-    private void removePriceLevel(PriceLevel priceLevel, Side side) {
-        if (side == Side.BID) {
-            removePriceLevel(bidPriceLevels, bidPriceLevelMap, bidPriceLevelsDepth, priceLevel);
-        } else {
-            removePriceLevel(askPriceLevels, askPriceLevelMap, askPriceLevelsDepth, priceLevel);
-        }
-    }
-
-    private void addPriceLevel(SortedSet<PriceLevel> priceLevels,
-                               Map<BigDecimal, PriceLevel> priceLevelMap,
-                               AtomicLong priceLevelDepth,
-                               PriceLevel priceLevel) {
-        priceLevelMap.put(priceLevel.getPrice(), priceLevel);
-        priceLevels.add(priceLevel);
-        priceLevelDepth.getAndIncrement();
-    }
-
-    private void removePriceLevel(SortedSet<PriceLevel> priceLevels,
-                                  Map<BigDecimal, PriceLevel> priceLevelMap,
-                                  AtomicLong priceLevelDepth,
-                                  PriceLevel priceLevel) {
-        priceLevelMap.remove(priceLevel.getPrice());
-        priceLevels.remove(priceLevel);
-        priceLevelDepth.getAndDecrement();
     }
 
 
