@@ -111,7 +111,7 @@ public class OrderBookTest {
     }
 
     @Test
-    public void onNewOrderTest(){
+    public void anotherTest(){
         Level2View book = createOrderBook();
         book.onNewOrder(BID, BigDecimal.valueOf(21.0), 100, ORDER_1);
         checkTopOfBook(book, P21, P0);
@@ -126,6 +126,10 @@ public class OrderBookTest {
         checkSizeForPriceLevel(book, P21, 400, 0);
         checkSizeForPriceLevel(book, P22, 0, 700);
         checkBookDepth(book, 1, 1);
+        book.onReplaceOrder(P22, 150, ORDER_1);
+        checkTopOfBook(book, P22, P22);
+        checkSizeForPriceLevel(book, P21, 300, 0);
+        checkSizeForPriceLevel(book, P22, 150, 700);
     }
 
     @Test
@@ -133,10 +137,7 @@ public class OrderBookTest {
 
     }
 
-    @Test
-    public void onReplaceOrderTest(){
 
-    }
 
     @Test
     public void onTradeTest(){
@@ -146,7 +147,7 @@ public class OrderBookTest {
 
 
     private Level2View createOrderBook(){
-        return new OrderBook();
+        return new OrderBook3();
     }
 
     private void checkBookDepth(Level2View orderBook, long expectedBidDepth, long expectedAskDepth) {

@@ -38,6 +38,8 @@ public class NewOrderBook implements Level2View {
     public NewOrderBook(int priceScale) {
         this.priceScale = priceScale;
         orderMap = new ConcurrentHashMap<>();
+        bidPriceLevelsDepth = new AtomicLong(0);
+        askPriceLevelsDepth = new AtomicLong(0);
         bidPriceLevels = new ConcurrentSkipListSet<>(PRICE_LEVEL_DESCENDING);
         askPriceLevels = new ConcurrentSkipListSet<>(PRICE_LEVEL_ASCENDING);
         bidPriceLevelMap = new ConcurrentHashMap<>();
@@ -48,28 +50,32 @@ public class NewOrderBook implements Level2View {
 
     @Override
     public void onNewOrder(Side side, BigDecimal price, long quantity, long orderId) {
-        executor.submit(new NewOrderTask(side, normalizePrice(price), quantity, orderId));
+        new NewOrderTask(side, normalizePrice(price), quantity, orderId).run();
+        //executor.submit(new NewOrderTask(side, normalizePrice(price), quantity, orderId));
     }
 
     @Override
     public void onCancelOrder(long orderId) {
-        executor.submit(new CancelOrderTask(orderId));
+        new CancelOrderTask(orderId).run();
+        //executor.submit(new CancelOrderTask(orderId));
     }
 
     @Override
     public void onReplaceOrder(BigDecimal price, long quantity, long orderId) {
-        executor.submit(new ReplaceOrderTask(normalizePrice(price), quantity, orderId));
+        new ReplaceOrderTask(normalizePrice(price), quantity, orderId).run();
+        //executor.submit(new ReplaceOrderTask(normalizePrice(price), quantity, orderId));
     }
 
     @Override
     public void onTrade(long quantity, long restingOrderId) {
-        executor.submit(new FillOrderTask(quantity, restingOrderId));
+        new FillOrderTask(quantity, restingOrderId).run();
+        //executor.submit(new FillOrderTask(quantity, restingOrderId));
     }
 
     @Override
     public long getSizeForPriceLevel(Side side, BigDecimal price) {
         Map<BigDecimal, PriceLevel> priceLevelMap = side == Side.BID ? bidPriceLevelMap : askPriceLevelMap;
-        PriceLevel priceLevel = priceLevelMap.get(price);
+        PriceLevel priceLevel = priceLevelMap.get(normalizePrice(price));
         return priceLevel == null ? 0 : priceLevel.getTotalOrderQuantity().get();
     }
 
