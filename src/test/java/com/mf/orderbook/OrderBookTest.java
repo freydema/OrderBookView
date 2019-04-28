@@ -12,8 +12,12 @@ import org.junit.Test;
 
 import static com.mf.orderbook.Level2View.Side.*;
 
+/**
+ *  @author Marc Freydefont
+ */
 public class OrderBookTest {
 
+    private static final int DEFAULT_PRICE_SCALE = 4;
     private static final long SEED = 1;
     private static final long ORDER_1 = 1;
     private static final long ORDER_2 = 2;
@@ -136,7 +140,6 @@ public class OrderBookTest {
         checkBookDepth(book, 0, 0);
         // Replace an order that does not exist -> no change
         book.onReplaceOrder(P21, 100, ORDER_1);
-
         checkSizeForPriceLevel(book, P0, 0, 0);
         checkTopOfBook(book, P0, P0);
         checkBookDepth(book, 0, 0);
@@ -189,7 +192,7 @@ public class OrderBookTest {
         // Test the impact of the number of threads adding orders for a small price range
         newOrderloadTest(nbOrders, 1, 10, 12);
         newOrderloadTest(nbOrders, 4, 10, 12);
-        newOrderloadTest(nbOrders, 8, 10, 12);
+        newOrderloadTest(nbOrders, 16, 10, 12);
         // Test the impact of the number of threads adding orders for large price range
         newOrderloadTest(nbOrders, 1, 10, 60);
         newOrderloadTest(nbOrders, 4, 10, 60);
@@ -202,14 +205,11 @@ public class OrderBookTest {
         System.out.println("NewOrderLoadTest: nbOrders = " + nbOrders + " nbThreads = " + nbThreads);
         System.out.println("minPrice = " + minPrice + " maxPrice = " + maxPrice);
         System.out.println("------------------------------------------------------------------------");
-        Level2View book = createOrderBook();
-        int priceScale = 4;
+        Level2View book = createOrderBook(); // with DEFAULT_PRICE_SCALE
         int minQty = 100;
         int maxQty = 200;
-
         BigDecimal bestBid = null;
         BigDecimal bestAsk = null;
-
         Map<BigDecimal, Long> bids = new HashMap<>();
         Map<BigDecimal, Long> asks = new HashMap<>();
 
@@ -219,7 +219,7 @@ public class OrderBookTest {
         List<Runnable> actionQueue = new ArrayList<>();
         CountDownLatch countDownLatch = new CountDownLatch(nbOrders);
         for (int i = 1; i <= nbOrders; i++) {
-            BigDecimal price = BigDecimal.valueOf(r.nextDouble() * (maxPrice - minPrice) + minPrice).setScale(priceScale, RoundingMode.UP);
+            BigDecimal price = BigDecimal.valueOf(r.nextDouble() * (maxPrice - minPrice) + minPrice).setScale(DEFAULT_PRICE_SCALE, RoundingMode.UP);
             long quantity = r.nextInt(maxQty) + minQty;
             Level2View.Side side = r.nextBoolean() ? BID : ASK;
             if (side == BID) {
@@ -274,8 +274,6 @@ public class OrderBookTest {
         }
     }
 
-
-
     private void checkBookDepth(Level2View orderBook, long expectedBidDepth, long expectedAskDepth) {
         Assert.assertEquals(expectedBidDepth, orderBook.getBookDepth(BID));
         Assert.assertEquals(expectedAskDepth, orderBook.getBookDepth(ASK));
@@ -326,4 +324,5 @@ public class OrderBookTest {
             if (countDownLatch != null) countDownLatch.countDown();
         }
     }
+
 }

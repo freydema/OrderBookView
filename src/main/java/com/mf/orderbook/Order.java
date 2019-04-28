@@ -3,6 +3,9 @@ package com.mf.orderbook;
 import java.math.BigDecimal;
 import static com.mf.orderbook.Level2View.Side;
 
+/**
+ *  @author Marc Freydefont
+ */
 public class Order {
 
     private final Side side;

@@ -3,8 +3,10 @@ package com.mf.orderbook;
 import java.math.BigDecimal;
 import java.util.concurrent.atomic.AtomicLong;
 
-
-public class PriceLevel {
+/**
+ *  @author Marc Freydefont
+ */
+class PriceLevel {
 
     private final BigDecimal price;
     private final AtomicLong totalOrderQuantity;
@@ -25,9 +27,4 @@ public class PriceLevel {
     void updateTotalOrderQuantity(long delta){
         totalOrderQuantity.getAndAdd(delta);
     }
-
-
-
-
-
 }

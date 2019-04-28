@@ -11,23 +11,44 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-
+/**
+ *    - From the description of the Level2View interface, I assumed that there is no order matching to implement
+ *      (i.e, no need to maintain an order queue on a price level, simpler logic for onNewOrder).
+ *      If you expected order matching, well... I guess it's Game Over for me.
+ *
+ *    - Since it was not specified, I also assumed that the implementation should be thread-safe when calling the market
+ *      events: onNewOrder, onCancelOrder, onReplaceOrder, onTrade  (example: 2 threads calling onNewOrder at the same time)
+ *      In real-life, I imagine more 1 single thread, consuming a data feed, that calls the event handlers
+ *      and 1-N threads querying the book state (getSizeForPriceLevel, getBookDepth, getTopOfBook)
+ *      In this case, I would look at getting rid of the price level locks, because they would not add any value.
+ *
+ *    - Further work includes, adding more load tests including cancel, replace and fills. At the moment,
+ *      besides basic unit tests, I wrote only a load test that create orders and check the state of the book at the end.
+ *      See the OrderBookTest class. the load test shows that the bigger the depth of the book is, the slower it is. I believe the ConcurrentSkipListSet used
+ *      to maintain the price levels are the main bottleneck.
+ *
+ *   @author Marc Freydefont
+ */
 public class OrderBook implements Level2View {
 
-    private static final int DEFAULT_PRICE_SCALE = 4;
+    static final int DEFAULT_PRICE_SCALE = 4;
     private static Comparator<PriceLevel> PRICE_LEVEL_ASCENDING = (p1, p2) -> p1.getPrice().compareTo(p2.getPrice());
     private static Comparator<PriceLevel> PRICE_LEVEL_DESCENDING = (p1, p2) -> -p1.getPrice().compareTo(p2.getPrice());
 
-
-    // Contain RW locks
-    private final Map<BigDecimal, Lock> priceLevelLocks;
-
+    // The price scale used by the order book. Used for normalizing BigDecimal prices
     private final int priceScale;
+    // Contains locks for synchronizing code at the PriceLevel..level
+    private final Map<BigDecimal, Lock> priceLevelLocks;
+    // Orders indexed by their order id
     private final Map<Long, Order> orderMap;
+    // Depth counters. This is to make the getBookDepth() faster, rather than calling (bid/ask)priceLevels.size()
     private final AtomicLong bidPriceLevelsDepth;
     private final AtomicLong askPriceLevelsDepth;
+    // Contains the price levels ordered (ascending for asks and descending for bids)
+    // Allows quick look up for the top of book. However adding and removing price levels is o(log N) and size() is not constant time
     private final SortedSet<PriceLevel> bidPriceLevels;
     private final SortedSet<PriceLevel> askPriceLevels;
+    // Fast access to a price level and its total size by the price
     private final Map<BigDecimal, PriceLevel> bidPriceLevelMap;
     private final Map<BigDecimal, PriceLevel> askPriceLevelMap;
 
