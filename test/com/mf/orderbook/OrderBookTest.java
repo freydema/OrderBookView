@@ -24,7 +24,7 @@ public class OrderBookTest {
 
     @Test
     public void getBookDepthTest() {
-        Level2View book = new OrderBook();
+        Level2View book = createOrderBook();
         checkBookDepth(book, 0, 0);
         // Place order 1: +1 on the BID depth
         book.onNewOrder(BID, P21, 100, ORDER_1);
@@ -57,7 +57,7 @@ public class OrderBookTest {
 
     @Test
     public void getTopOfBookTest() {
-        Level2View book = new OrderBook();
+        Level2View book = createOrderBook();
         checkTopOfBook(book, P0, P0); // or null, null ?
         // Place order 1: top bid = 21
         book.onNewOrder(BID, P21, 100, ORDER_1);
@@ -84,7 +84,7 @@ public class OrderBookTest {
 
     @Test
     public void getSizeForPriceLevelTest(){
-        Level2View book = new OrderBook();
+        Level2View book = createOrderBook();
         //BigDecimal P21 = Level2ViewTest.P21;
         // No order for price level: BID and ASK sizes are zero on price level 1
         book.getSizeForPriceLevel(ASK, P21);
@@ -112,7 +112,7 @@ public class OrderBookTest {
 
     @Test
     public void onNewOrderTest(){
-        Level2View book = new OrderBook();
+        Level2View book = createOrderBook();
         book.onNewOrder(BID, BigDecimal.valueOf(21.0), 100, ORDER_1);
         checkTopOfBook(book, P21, P0);
         checkSizeForPriceLevel(book, P21, 100, 0);
@@ -141,6 +141,11 @@ public class OrderBookTest {
     @Test
     public void onTradeTest(){
 
+    }
+
+
+    private Level2View createOrderBook(){
+        return new OrderBook();
     }
 
     private void checkBookDepth(Level2View orderBook, long expectedBidDepth, long expectedAskDepth) {

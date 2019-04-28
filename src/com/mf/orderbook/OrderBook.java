@@ -1,24 +1,36 @@
 package com.mf.orderbook;
 
+
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 public class OrderBook implements Level2View {
 
+
+    private static final int DEFAULT_PRICE_SCALE = 4;
+
     private final OrderBookSide bids;
     private final OrderBookSide asks;
+    private final int priceScale;
 
-    public OrderBook() {
-        bids = new OrderBookSide(Side.BID);
-        asks = new OrderBookSide(Side.ASK);
+
+    public OrderBook(){
+        this(DEFAULT_PRICE_SCALE);
     }
 
-    //TODO normalize scale of BigDecimal so that they can be used as keys for map
+
+    public OrderBook(int priceScale) {
+        bids = new OrderBookSide(Side.BID);
+        asks = new OrderBookSide(Side.ASK);
+        this.priceScale = priceScale;
+    }
 
 
     @Override
     public void onNewOrder(Side side, BigDecimal price, long quantity, long orderId) {
-        selectOrderBookSide(side).createOrder(side, price, quantity, orderId);
+        selectOrderBookSide(side).createOrder(side, normalizePrice(price), quantity, orderId);
     }
+
 
     @Override
     public void onCancelOrder(long orderId) {
@@ -27,12 +39,15 @@ public class OrderBook implements Level2View {
         }
     }
 
+
     @Override
     public void onReplaceOrder(BigDecimal price, long quantity, long orderId) {
-        if(!bids.replaceOrder(price, quantity, orderId)){
-            asks.replaceOrder(price, quantity, orderId);
+        BigDecimal normalizedPrice = normalizePrice(price);
+        if(!bids.replaceOrder(normalizedPrice, quantity, orderId)){
+            asks.replaceOrder(normalizedPrice, quantity, orderId);
         }
     }
+
 
     @Override
     public void onTrade(long quantity, long restingOrderId) {
@@ -41,9 +56,10 @@ public class OrderBook implements Level2View {
         }
     }
 
+
     @Override
     public long getSizeForPriceLevel(Side side, BigDecimal price) {
-        return selectOrderBookSide(side).getPriceLevelSize(price);
+        return selectOrderBookSide(side).getPriceLevelSize(normalizePrice(price));
     }
 
     @Override
@@ -51,13 +67,19 @@ public class OrderBook implements Level2View {
         return selectOrderBookSide(side).getDepth();
     }
 
+
     @Override
     public BigDecimal getTopOfBook(Side side) {
         return selectOrderBookSide(side).getTop();
     }
 
+
     private OrderBookSide selectOrderBookSide(Side side){
         return  side == Side.BID ? bids : asks;
     }
 
+
+    private BigDecimal normalizePrice(BigDecimal price){
+        return price.setScale(priceScale, RoundingMode.UNNECESSARY);
+    }
 }

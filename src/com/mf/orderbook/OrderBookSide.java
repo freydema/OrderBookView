@@ -1,6 +1,7 @@
 package com.mf.orderbook;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.SortedSet;
@@ -11,6 +12,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 
 class OrderBookSide {
+
 
     private ReadWriteLock rwLock;
     private final SortedSet<PriceLevel> priceLevels; // use descending comparator
@@ -35,11 +37,12 @@ class OrderBookSide {
     }
 
     void createOrder(Level2View.Side side, BigDecimal price, long quantity, long orderId) {
-        PriceLevel priceLevel = priceLevelMap.get(price);
-        Order order = new Order(side, price, quantity, orderId);
+        BigDecimal normalizedPrice = price.setScale(4, RoundingMode.UNNECESSARY);
+        PriceLevel priceLevel = priceLevelMap.get(normalizedPrice);
+        Order order = new Order(side, normalizedPrice, quantity, orderId);
         orderMap.put(orderId, order);
         if (priceLevel == null) {
-            priceLevel = new PriceLevel(price, quantity);
+            priceLevel = new PriceLevel(normalizedPrice, quantity);
             order.setPriceLevel(priceLevel);
             addPriceLevel(priceLevel);
         } else {
@@ -124,5 +127,7 @@ class OrderBookSide {
             rwLock.writeLock().unlock();
         }
     }
+
+
 
 }
